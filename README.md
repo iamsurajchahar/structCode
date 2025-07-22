@@ -55,7 +55,3 @@ A modern platform for learning Data Structures and Algorithms through interactiv
 **Suraj Singh Chahar**
 - GitHub: [@iamsurajchahar](https://github.com/iamsurajchahar)
 - LinkedIn: [imsurajchahar](https://linkedin.com/in/imsurajchahar)
-
-## License
-
-MIT License
