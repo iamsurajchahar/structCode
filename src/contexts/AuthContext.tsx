@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 
 interface AuthContextType {
   user: User | null;
@@ -74,12 +74,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAdmin(false);
   }, [user]);
 
+  // Enhanced OAuth redirect handling
+  const handleOAuthRedirect = async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasAuthParams = urlParams.has('access_token') || 
+                         urlParams.has('refresh_token') || 
+                         urlParams.has('error') || 
+                         urlParams.has('code') ||
+                         urlParams.has('provider');
+    
+    if (hasAuthParams) {
+      console.log('OAuth redirect detected, processing...');
+      setLoading(true);
+      
+      try {
+        // Wait a bit for Supabase to process the OAuth response
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Get the current session after OAuth redirect
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('Error getting session after OAuth:', error);
+          toast.error('Authentication failed. Please try again.');
+          return;
+        }
+        
+        if (data?.session) {
+          console.log('OAuth session found:', data.session.user.email);
+          setSession(data.session);
+          setUser(data.session.user);
+          
+          // Save profile in background
+          saveUserProfile(data.session.user);
+          
+          // Clear URL parameters
+          window.history.replaceState({}, document.title, window.location.pathname);
+          
+          toast.success('Successfully signed in!');
+        } else {
+          console.log('No session found after OAuth redirect');
+          setSession(null);
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Error processing OAuth redirect:', error);
+        toast.error('Authentication failed. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   // Load session from localStorage on initial render (optimized)
   useEffect(() => {
     const loadSessionFromStorage = async () => {
       setLoading(true);
       
       try {
+        // First check for OAuth redirect
+        await handleOAuthRedirect();
+        
+        // Then get the current session
         const { data, error } = await supabase.auth.getSession();
         
         if (error) {

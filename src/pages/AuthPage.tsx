@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { toast } from '@/components/ui/use-toast';
+import { toast } from '@/components/ui/sonner';
 import { supabase, adminSupabase } from '@/integrations/supabase/client';
 import { checkUserExists, manuallyConfirmUser } from '@/integrations/supabase/rpcTypes';
 import { useAuth } from '@/contexts/AuthContext';
 import { Mail, Lock, User } from 'lucide-react';
+
 
 const AuthPage = () => {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -29,30 +30,30 @@ const AuthPage = () => {
     }
   }, [user, navigate]);
 
-  // Optimized OAuth redirect handling
-  useEffect(() => {
-    const checkOAuthRedirect = async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const hasAuthParams = urlParams.has('access_token') || urlParams.has('refresh_token') || urlParams.has('error') || urlParams.has('code');
+  // Check if user exists in the database
+  const checkUserExistence = async (email: string): Promise<boolean> => {
+    try {
+      console.log('Checking user existence for:', email);
+      const { data, error } = await checkUserExists(email);
       
-      if (hasAuthParams) {
-        try {
-          const { data } = await supabase.auth.getSession();
-          if (data?.session?.user) {
-            await refreshSession();
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
-        } catch (err) {
-          console.error('Error processing OAuth redirect:', err);
-        }
+      if (error) {
+        console.error('Error checking user existence:', error);
+        // If we can't check, assume user doesn't exist to be safe
+        return false;
       }
-    };
-    
-    checkOAuthRedirect();
-  }, [refreshSession]);
+      
+      const exists = data?.exists || false;
+      console.log('User exists check result:', exists);
+      return exists;
+    } catch (error) {
+      console.error('Error checking user existence:', error);
+      // If we can't check, assume user doesn't exist to be safe
+      return false;
+    }
+  };
 
   // Optimized user profile saving (non-blocking)
-  const saveUserProfile = async (userId, userData) => {
+  const saveUserProfile = async (userId: string, userData: any) => {
     setTimeout(async () => {
       try {
         const { data: existingProfile } = await supabase
@@ -97,27 +98,16 @@ const AuthPage = () => {
           
           await manuallyConfirmUser(normalizedEmail);
           
-          toast({
-            title: "Account Troubleshooting",
-            description: `Account found and confirmation attempted. Please try signing in.`,
-          });
+          toast.success("Account found and confirmation attempted. Please try signing in.");
         } catch (error) {
           console.error('Confirmation error:', error);
         }
       } else {
-        toast({
-          title: "Account Not Found",
-          description: "No account was found with this email address. Please sign up first.",
-          variant: "destructive",
-        });
+        toast.error("No account was found with this email address. Please sign up first.");
       }
     } catch (error) {
       console.error('Error during troubleshooting:', error);
-      toast({
-        title: "Troubleshooting Error",
-        description: error.message || "An unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error(error.message || "An unknown error occurred");
     } finally {
       setLoading(false);
     }
@@ -128,32 +118,42 @@ const AuthPage = () => {
     setLoading(true);
 
     try {
+      const normalizedEmail = normalizeEmail(email);
+      console.log('Starting email auth for:', normalizedEmail, 'isSignUp:', isSignUp);
+      
       if (isSignUp) {
+        // Check if user already exists
+        console.log('Checking if user exists for signup...');
+        const userExists = await checkUserExistence(normalizedEmail);
+        
+        if (userExists) {
+          console.log('User already exists, switching to signin mode');
+          toast.error("You already have an account. Please sign in.");
+          setIsSignUp(false);
+          setEmail(normalizedEmail);
+          setPassword('');
+          setFullName('');
+          setLoading(false);
+          return;
+        }
+
+        console.log('User does not exist, proceeding with signup');
         // Validate inputs
         if (password.length < 6) {
-          toast({
-            title: "Invalid Password",
-            description: "Password must be at least 6 characters long",
-            variant: "destructive",
-          });
+          toast.error("Password must be at least 6 characters long");
           setLoading(false);
           return;
         }
 
         if (!fullName.trim()) {
-          toast({
-            title: "Full Name Required",
-            description: "Please enter your full name to create an account.",
-            variant: "destructive",
-          });
+          toast.error("Please enter your full name to create an account.");
           setLoading(false);
           return;
         }
         
-        const normalizedEmail = normalizeEmail(email);
-        
         // Try admin API first for faster signup
         if (adminSupabase) {
+          console.log('Using admin API for signup');
           const { data, error } = await adminSupabase.auth.admin.createUser({
             email: normalizedEmail,
             password,
@@ -164,14 +164,11 @@ const AuthPage = () => {
           });
           
           if (error) {
+            console.error('Admin signup error:', error);
             if (error.message.includes('User already registered') || 
                 error.message.includes('already exists') ||
                 error.message.includes('duplicate key')) {
-              toast({
-                title: "Account Already Exists",
-                description: "An account with this email already exists. Please sign in instead.",
-                variant: "destructive",
-              });
+              toast.error("You already have an account. Please sign in.");
               setIsSignUp(false);
               setEmail(normalizedEmail);
               setPassword('');
@@ -182,6 +179,7 @@ const AuthPage = () => {
             throw error;
           }
           
+          console.log('Admin signup successful, signing in...');
           // Sign in immediately after admin signup
           const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email: normalizedEmail,
@@ -189,10 +187,12 @@ const AuthPage = () => {
           });
           
           if (signInError) {
+            console.error('Signin after admin signup error:', signInError);
             throw signInError;
           }
           
           if (signInData?.session) {
+            console.log('Signin after admin signup successful');
             // Save profile in background
             saveUserProfile(
               signInData.user.id, 
@@ -204,10 +204,7 @@ const AuthPage = () => {
             
             await refreshSession();
             
-            toast({
-              title: "Account created and verified!",
-              description: "Welcome to StructCode!",
-            });
+            toast.success("Account created and verified! Welcome to StructCode!");
             
             localStorage.setItem('hasVisitedBefore', 'true');
             navigate('/');
@@ -216,6 +213,7 @@ const AuthPage = () => {
         }
         
         // Fallback to regular signup
+        console.log('Using regular signup');
         const { data, error } = await supabase.auth.signUp({
           email: normalizedEmail,
           password,
@@ -228,14 +226,11 @@ const AuthPage = () => {
         });
         
         if (error) {
+          console.error('Regular signup error:', error);
           if (error.message.includes('User already registered') || 
               error.message.includes('already exists') ||
               error.message.includes('duplicate key')) {
-            toast({
-              title: "Account Already Exists",
-              description: "An account with this email already exists. Please sign in instead.",
-              variant: "destructive",
-            });
+            toast.error("You already have an account. Please sign in.");
             setIsSignUp(false);
             setEmail(normalizedEmail);
             setPassword('');
@@ -247,6 +242,7 @@ const AuthPage = () => {
         }
 
         if (data?.session) {
+          console.log('Regular signup successful with session');
           // Save profile in background
           saveUserProfile(
             data.user.id, 
@@ -258,10 +254,7 @@ const AuthPage = () => {
           
           await refreshSession();
           
-          toast({
-            title: "Account created successfully!",
-            description: "Welcome to StructCode!",
-          });
+          toast.success("Account created successfully! Welcome to StructCode!");
           
           localStorage.setItem('hasVisitedBefore', 'true');
           navigate('/');
@@ -269,6 +262,7 @@ const AuthPage = () => {
         }
         
         // Try manual confirmation for immediate access
+        console.log('Trying manual confirmation');
         try {
           await manuallyConfirmUser(normalizedEmail);
           
@@ -278,6 +272,7 @@ const AuthPage = () => {
           });
           
           if (!signInError && signInData?.session) {
+            console.log('Manual confirmation successful');
             // Save profile in background
             saveUserProfile(
               signInData.user.id, 
@@ -289,10 +284,7 @@ const AuthPage = () => {
             
             await refreshSession();
             
-            toast({
-              title: "Account created successfully!",
-              description: "Welcome to StructCode!",
-            });
+            toast.success("Account created successfully! Welcome to StructCode!");
             
             localStorage.setItem('hasVisitedBefore', 'true');
             navigate('/');
@@ -309,9 +301,22 @@ const AuthPage = () => {
         });
         
       } else {
-        // Sign in flow
-        const normalizedEmail = normalizeEmail(email);
+        // Sign in flow - check if user exists first
+        console.log('Checking if user exists for signin...');
+        const userExists = await checkUserExistence(normalizedEmail);
         
+        if (!userExists) {
+          console.log('User does not exist, switching to signup mode');
+          toast.error("No account found. Please sign up first.");
+          setIsSignUp(true);
+          setEmail(normalizedEmail);
+          setPassword('');
+          setFullName('');
+          setLoading(false);
+          return;
+        }
+        
+        console.log('User exists, attempting signin');
         console.log('Attempting sign in with:', normalizedEmail);
         
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -337,12 +342,10 @@ const AuthPage = () => {
               });
               
               if (!retryError && retryData?.session) {
+                console.log('Signin successful after confirmation');
                 await refreshSession();
                 
-                toast({
-                  title: "Welcome back!",
-                  description: "You have successfully signed in.",
-                });
+                toast.success("Welcome back! You have successfully signed in.");
                 
                 localStorage.setItem('hasVisitedBefore', 'true');
                 navigate('/');
@@ -359,23 +362,11 @@ const AuthPage = () => {
           
           // Show more specific error messages
           if (error.message.includes('Invalid login credentials')) {
-            toast({
-              title: "Invalid Credentials",
-              description: "Please check your email and password and try again.",
-              variant: "destructive",
-            });
+            toast.error("Invalid credentials. Please check your email and password and try again.");
           } else if (error.message.includes('Email not confirmed')) {
-            toast({
-              title: "Email Not Verified",
-              description: "Please check your email and click the verification link before signing in.",
-              variant: "destructive",
-            });
+            toast.error("Please check your email and click the verification link before signing in.");
           } else {
-            toast({
-              title: "Authentication Error",
-              description: error.message,
-              variant: "destructive",
-            });
+            toast.error(error.message);
           }
           return;
         }
@@ -384,10 +375,7 @@ const AuthPage = () => {
           console.log('Sign in successful');
           await refreshSession();
           
-          toast({
-            title: "Welcome back!",
-            description: "You have successfully signed in.",
-          });
+          toast.success("Welcome back! You have successfully signed in.");
           
           localStorage.setItem('hasVisitedBefore', 'true');
           navigate('/');
@@ -397,11 +385,7 @@ const AuthPage = () => {
       }
     } catch (error: any) {
       console.error('Authentication error:', error.message);
-      toast({
-        title: "Authentication Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }
@@ -413,7 +397,7 @@ const AuthPage = () => {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/`,
+          redirectTo: `${window.location.origin}/auth`,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -425,19 +409,12 @@ const AuthPage = () => {
         throw error;
       }
       
-      toast({
-        title: "Redirecting to Google",
-        description: "Please complete the sign-in process with Google.",
-      });
+      // Don't show toast here as we're redirecting
+      console.log('OAuth redirect initiated');
       
     } catch (error: any) {
       console.error('Google OAuth error:', error);
-      toast({
-        title: "Google Sign-in Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
+      toast.error(`Google Sign-in Error: ${error.message}`);
       setLoading(false);
     }
   };
@@ -563,6 +540,8 @@ const AuthPage = () => {
 
         </CardContent>
       </Card>
+      
+
     </div>
   );
 };

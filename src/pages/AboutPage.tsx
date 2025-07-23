@@ -9,7 +9,7 @@ const AboutPage = () => {
         
         <div className="prose prose-lg dark:prose-invert max-w-none">
           <p className="lead text-xl mb-8">
-            Hello! I’m Suraj Singh Chahar, a Software Engineer.
+           Hello! I’m Suraj Singh Chahar, a Software Engineer.
           </p>
           
           <h2 className="text-2xl font-bold mb-4">💻 My Journey</h2>
