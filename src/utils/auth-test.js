@@ -1,198 +1,79 @@
-async function checkAuth() {
-  // Access the Supabase client from window
-  const { supabase } = window;
-  
-  if (!supabase) {
-    console.error("Supabase client not found in window object");
-    return;
-  }
-  
-  console.group('🔐 Auth State Check');
-  
-  try {
-    // Get current session
-    const { data, error } = await supabase.auth.getSession();
+// Auth testing utilities for development
+console.log('🔧 Auth testing utilities loaded');
+
+// Add global debug functions
+window.authDebug = {
+  // Check Supabase configuration
+  checkConfig: () => {
+    console.log('=== SUPABASE CONFIG CHECK ===');
+    console.log('URL:', import.meta.env.VITE_SUPABASE_URL ? '✅ Set' : '❌ Missing');
+    console.log('Anon Key:', import.meta.env.VITE_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing');
+    console.log('Service Role Key:', import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY ? '✅ Set' : '❌ Missing');
     
-    if (error) {
-      console.error("Error getting session:", error);
-      return;
+    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+      console.error('❌ Missing required Supabase environment variables!');
+      console.error('Please check your .env file and ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set.');
     }
-    
-    if (data?.session) {
-      console.log("✅ User is logged in");
-      console.log("User ID:", data.session.user.id);
-      console.log("Email:", data.session.user.email);
-      console.log("Auth Provider:", data.session.user.app_metadata.provider);
-      console.log("Session expires at:", new Date(data.session.expires_at * 1000).toLocaleString());
+  },
+  
+  // Test OAuth flow
+  testOAuth: async () => {
+    console.log('=== TESTING OAUTH FLOW ===');
+    try {
+      const { data, error } = await window.supabaseClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
+        }
+      });
       
-      // Check if user has a profile
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', data.session.user.id)
-        .single();
-      
-      if (profileError) {
-        console.error("❌ Error fetching user profile:", profileError);
-      } else if (profileData) {
-        console.log("✅ User profile found:", profileData);
+      if (error) {
+        console.error('❌ OAuth error:', error);
       } else {
-        console.warn("⚠️ No profile found for this user!");
+        console.log('✅ OAuth redirect initiated');
       }
-    } else {
-      console.log("❌ No active session - user is not logged in");
+    } catch (err) {
+      console.error('❌ OAuth test failed:', err);
     }
-  } catch (err) {
-    console.error("Error in auth check:", err);
-  }
+  },
   
-  console.groupEnd();
-  return "Auth check complete";
-}
-
-// Test signup function (for debugging only)
-async function testSignUp(email, password, fullName = "Test User") {
-  const { supabase } = window;
-  
-  if (!supabase) {
-    console.error("Supabase client not found");
-    return;
-  }
-  
-  console.group('🔐 Test Sign Up');
-  console.log(`Attempting to sign up: ${email}`);
-  
-  try {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName
-        },
-        emailRedirectTo: null // Disable email verification for testing
+  // Check current session
+  checkSession: async () => {
+    console.log('=== SESSION CHECK ===');
+    try {
+      const { data, error } = await window.supabaseClient.auth.getSession();
+      if (error) {
+        console.error('❌ Session error:', error);
+      } else if (data?.session) {
+        console.log('✅ Session found:', data.session.user.email);
+      } else {
+        console.log('❌ No session found');
       }
-    });
-    
-    if (error) {
-      console.error("❌ Sign up failed:", error);
-    } else {
-      console.log("✅ Sign up response:", data);
+    } catch (err) {
+      console.error('❌ Session check failed:', err);
     }
-  } catch (err) {
-    console.error("❌ Error during sign up:", err);
-  }
+  },
   
-  console.groupEnd();
-  return "Signup test complete";
-}
-
-// Test sign in function
-async function testSignIn(email, password) {
-  const { supabase } = window;
-  
-  if (!supabase) {
-    console.error("Supabase client not found");
-    return;
-  }
-  
-  console.group('🔐 Test Sign In');
-  console.log(`Attempting to sign in: ${email}`);
-  
-  try {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
-    
-    if (error) {
-      console.error("❌ Sign in failed:", error);
-    } else {
-      console.log("✅ Sign in successful:", data);
+  // Clear all auth data
+  clearAuth: () => {
+    console.log('=== CLEARING AUTH DATA ===');
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      console.log('✅ Auth data cleared');
+    } catch (err) {
+      console.error('❌ Failed to clear auth data:', err);
     }
-  } catch (err) {
-    console.error("❌ Error during sign in:", err);
   }
-  
-  console.groupEnd();
-  return "Signin test complete";
-}
-
-// Manually save a profile
-async function saveProfile(userId, userData) {
-  const { supabase } = window;
-  
-  if (!supabase) {
-    console.error("Supabase client not found");
-    return;
-  }
-  
-  console.group('🧑‍💼 Save Profile');
-  
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .upsert([{
-        id: userId,
-        email: userData.email,
-        full_name: userData.full_name || 'User',
-        updated_at: new Date().toISOString(),
-        created_at: new Date().toISOString()
-      }]);
-    
-    if (error) {
-      console.error("❌ Profile save failed:", error);
-    } else {
-      console.log("✅ Profile saved successfully:", data);
-    }
-  } catch (err) {
-    console.error("❌ Error saving profile:", err);
-  }
-  
-  console.groupEnd();
-  return "Profile save complete";
-}
-
-// Force sign out (useful for testing)
-async function signOut() {
-  const { supabase } = window;
-  
-  if (!supabase) {
-    console.error("Supabase client not found");
-    return;
-  }
-  
-  console.group('🔐 Sign Out Test');
-  
-  try {
-    const { error } = await supabase.auth.signOut();
-    
-    if (error) {
-      console.error("❌ Sign out failed:", error);
-    } else {
-      console.log("✅ Signed out successfully");
-    }
-  } catch (err) {
-    console.error("❌ Error during sign out:", err);
-  }
-  
-  console.groupEnd();
-  return "Signout test complete";
-}
-
-// Export for browser console use
-const authTest = {
-  checkAuth,
-  testSignUp,
-  testSignIn,
-  saveProfile,
-  signOut
 };
 
-// Expose to window
-window.authTest = authTest;
+// Auto-check configuration on load
+setTimeout(() => {
+  window.authDebug.checkConfig();
+}, 1000);
 
-console.log("%c🔐 Auth Testing Utilities Loaded", "background: #593d88; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold;");
-console.log("%cTry: %cauthTest.checkAuth()", "font-weight: bold", "color: #593d88; font-weight: bold");
-
-export default authTest; 
+console.log('🔧 Use window.authDebug to access debugging functions'); 

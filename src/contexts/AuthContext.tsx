@@ -10,6 +10,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
   debugSession: () => Promise<void>;
+  retryOAuth: () => Promise<void>;
   isAdmin: boolean;
 }
 
@@ -74,7 +75,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAdmin(false);
   }, [user]);
 
-  // Enhanced OAuth redirect handling
+  // Enhanced OAuth redirect handling with better timing
   const handleOAuthRedirect = async () => {
     const urlParams = new URLSearchParams(window.location.search);
     const hasAuthParams = urlParams.has('access_token') || 
@@ -87,9 +88,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('OAuth redirect detected, processing...');
       setLoading(true);
       
+      // Check for OAuth errors first
+      const error = urlParams.get('error');
+      const errorDescription = urlParams.get('error_description');
+      
+      if (error) {
+        console.error('OAuth error detected:', error, errorDescription);
+        toast.error(`Authentication failed: ${errorDescription || error}`);
+        setLoading(false);
+        // Clear URL parameters
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return;
+      }
+      
       try {
-        // Wait a bit for Supabase to process the OAuth response
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Wait for Supabase to process the OAuth response
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
         // Get the current session after OAuth redirect
         const { data, error } = await supabase.auth.getSession();
@@ -111,11 +125,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Clear URL parameters
           window.history.replaceState({}, document.title, window.location.pathname);
           
-          toast.success('Successfully signed in!');
+          toast.success(`Welcome back, ${data.session.user.user_metadata?.full_name || data.session.user.email}!`);
         } else {
           console.log('No session found after OAuth redirect');
           setSession(null);
           setUser(null);
+          toast.error('Authentication failed. No session was created.');
         }
       } catch (error) {
         console.error('Error processing OAuth redirect:', error);
@@ -144,11 +159,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         
         if (data?.session) {
+          console.log('Session found on load:', data.session.user.email);
           setSession(data.session);
           setUser(data.session.user);
           // Save profile in background
           saveUserProfile(data.session.user);
         } else {
+          console.log('No session found on load');
           setSession(null);
           setUser(null);
         }
@@ -201,6 +218,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (err) {
       console.error('Debug session error:', err);
+    }
+  };
+
+  // Manual OAuth retry function for debugging
+  const retryOAuth = async () => {
+    console.log('=== MANUAL OAUTH RETRY ===');
+    setLoading(true);
+    
+    try {
+      // Clear any existing auth data
+      await supabase.auth.signOut();
+      
+      // Wait a bit
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Try OAuth again
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
+        }
+      });
+      
+      if (error) {
+        console.error('OAuth retry error:', error);
+        toast.error(`OAuth retry failed: ${error.message}`);
+      } else {
+        console.log('OAuth retry initiated');
+      }
+    } catch (err) {
+      console.error('OAuth retry failed:', err);
+      toast.error('OAuth retry failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -272,6 +327,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signOut,
     refreshSession,
     debugSession,
+    retryOAuth,
     isAdmin,
   };
 

@@ -8,7 +8,7 @@ import { toast } from '@/components/ui/sonner';
 import { supabase, adminSupabase } from '@/integrations/supabase/client';
 import { checkUserExists, manuallyConfirmUser } from '@/integrations/supabase/rpcTypes';
 import { useAuth } from '@/contexts/AuthContext';
-import { Mail, Lock, User } from 'lucide-react';
+import { Mail, Lock, User, Loader2 } from 'lucide-react';
 
 
 const AuthPage = () => {
@@ -17,8 +17,9 @@ const AuthPage = () => {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { user, refreshSession } = useAuth();
+  const { user, refreshSession, retryOAuth } = useAuth();
 
   // Normalize email input
   const normalizeEmail = (email: string) => email.trim().toLowerCase();
@@ -29,6 +30,20 @@ const AuthPage = () => {
       navigate('/');
     }
   }, [user, navigate]);
+
+  // Check for OAuth errors in URL parameters
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const error = urlParams.get('error');
+    const errorDescription = urlParams.get('error_description');
+    
+    if (error) {
+      console.error('OAuth error in URL:', error, errorDescription);
+      setOauthError(`Authentication failed: ${errorDescription || error}`);
+      // Clear the error from URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   // Check if user exists in the database
   const checkUserExistence = async (email: string): Promise<boolean> => {
@@ -102,12 +117,12 @@ const AuthPage = () => {
         } catch (error) {
           console.error('Confirmation error:', error);
         }
-      } else {
-        toast.error("No account was found with this email address. Please sign up first.");
-      }
+              } else {
+          setOauthError("No account was found with this email address. Please sign up first.");
+        }
     } catch (error) {
       console.error('Error during troubleshooting:', error);
-      toast.error(error.message || "An unknown error occurred");
+      setOauthError(error.message || "An unknown error occurred");
     } finally {
       setLoading(false);
     }
@@ -116,6 +131,7 @@ const AuthPage = () => {
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setOauthError(null);
 
     try {
       const normalizedEmail = normalizeEmail(email);
@@ -128,7 +144,7 @@ const AuthPage = () => {
         
         if (userExists) {
           console.log('User already exists, switching to signin mode');
-          toast.error("You already have an account. Please sign in.");
+          setOauthError("You already have an account. Please sign in.");
           setIsSignUp(false);
           setEmail(normalizedEmail);
           setPassword('');
@@ -140,13 +156,13 @@ const AuthPage = () => {
         console.log('User does not exist, proceeding with signup');
         // Validate inputs
         if (password.length < 6) {
-          toast.error("Password must be at least 6 characters long");
+          setOauthError("Password must be at least 6 characters long");
           setLoading(false);
           return;
         }
 
         if (!fullName.trim()) {
-          toast.error("Please enter your full name to create an account.");
+          setOauthError("Please enter your full name to create an account.");
           setLoading(false);
           return;
         }
@@ -168,7 +184,7 @@ const AuthPage = () => {
             if (error.message.includes('User already registered') || 
                 error.message.includes('already exists') ||
                 error.message.includes('duplicate key')) {
-              toast.error("You already have an account. Please sign in.");
+              setOauthError("You already have an account. Please sign in.");
               setIsSignUp(false);
               setEmail(normalizedEmail);
               setPassword('');
@@ -307,7 +323,7 @@ const AuthPage = () => {
         
         if (!userExists) {
           console.log('User does not exist, switching to signup mode');
-          toast.error("No account found. Please sign up first.");
+          setOauthError("No account found. Please sign up first.");
           setIsSignUp(true);
           setEmail(normalizedEmail);
           setPassword('');
@@ -362,11 +378,11 @@ const AuthPage = () => {
           
           // Show more specific error messages
           if (error.message.includes('Invalid login credentials')) {
-            toast.error("Invalid credentials. Please check your email and password and try again.");
+            setOauthError("Invalid credentials. Please check your email and password and try again.");
           } else if (error.message.includes('Email not confirmed')) {
-            toast.error("Please check your email and click the verification link before signing in.");
+            setOauthError("Please check your email and click the verification link before signing in.");
           } else {
-            toast.error(error.message);
+            setOauthError(error.message);
           }
           return;
         }
@@ -385,7 +401,7 @@ const AuthPage = () => {
       }
     } catch (error: any) {
       console.error('Authentication error:', error.message);
-      toast.error(error.message);
+      setOauthError(error.message);
     } finally {
       setLoading(false);
     }
@@ -393,11 +409,13 @@ const AuthPage = () => {
 
   const handleGoogleAuth = async () => {
     setLoading(true);
+    setOauthError(null);
+    
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth`,
+          redirectTo: `${window.location.origin}/`,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -406,7 +424,9 @@ const AuthPage = () => {
       });
       
       if (error) {
-        throw error;
+        console.error('Google OAuth error:', error);
+        setOauthError(`Google Sign-in Error: ${error.message}`);
+        return;
       }
       
       // Don't show toast here as we're redirecting
@@ -414,7 +434,8 @@ const AuthPage = () => {
       
     } catch (error: any) {
       console.error('Google OAuth error:', error);
-      toast.error(`Google Sign-in Error: ${error.message}`);
+      setOauthError(`Google Sign-in Error: ${error.message}`);
+    } finally {
       setLoading(false);
     }
   };
@@ -432,6 +453,19 @@ const AuthPage = () => {
         </CardHeader>
         
         <CardContent className="space-y-4">
+          {oauthError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-600">{oauthError}</p>
+              <button
+                type="button"
+                onClick={() => setOauthError(null)}
+                className="text-xs text-red-500 hover:underline mt-1"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+          
           <Button
             type="button"
             variant="outline"
@@ -445,7 +479,14 @@ const AuthPage = () => {
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
-            {loading ? 'Redirecting to Google...' : 'Continue with Google'}
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Redirecting to Google...
+              </>
+            ) : (
+              'Continue with Google'
+            )}
           </Button>
 
           <div className="relative">
@@ -509,7 +550,14 @@ const AuthPage = () => {
             </div>
             
             <Button type="submit" className="w-full bg-dsa-purple hover:bg-dsa-purple/90" disabled={loading}>
-              {loading ? 'Processing...' : (isSignUp ? 'Create Account' : 'Sign In')}
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                isSignUp ? 'Create Account' : 'Sign In'
+              )}
             </Button>
           </form>
 
@@ -537,6 +585,99 @@ const AuthPage = () => {
             </button>
           </div>
           
+          {/* Debug section for development */}
+          {import.meta.env.DEV && (
+            <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+              <details className="text-xs">
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                  Debug Info (Development Only)
+                </summary>
+                <div className="mt-2 space-y-1">
+                  <div>User: {user?.email || 'Not signed in'}</div>
+                  <div>Loading: {loading ? 'Yes' : 'No'}</div>
+                  <div>URL Params: {window.location.search || 'None'}</div>
+                  <div>Supabase URL: {import.meta.env.VITE_SUPABASE_URL ? '✅ Set' : '❌ Missing'}</div>
+                  <div>Supabase Key: {import.meta.env.VITE_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing'}</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      console.log('=== DEBUG INFO ===');
+                      console.log('User:', user);
+                      console.log('Loading:', loading);
+                      console.log('URL:', window.location.href);
+                      console.log('URL Params:', window.location.search);
+                    }}
+                    className="text-xs text-blue-500 hover:underline"
+                  >
+                    Log Debug Info
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await refreshSession();
+                        toast.success('Session refreshed');
+                      } catch (error) {
+                        toast.error('Failed to refresh session');
+                      }
+                    }}
+                    className="text-xs text-green-500 hover:underline ml-2"
+                  >
+                    Refresh Session
+                  </button>
+                  <button
+                    type="button"
+                    onClick={retryOAuth}
+                    className="text-xs text-yellow-500 hover:underline ml-2"
+                  >
+                    Retry OAuth
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.authDebug) {
+                        window.authDebug.testOAuth();
+                      } else {
+                        console.log('Auth debug not available');
+                      }
+                    }}
+                    className="text-xs text-purple-500 hover:underline ml-2"
+                  >
+                    Test OAuth
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Manually trigger OAuth redirect handling
+                      const urlParams = new URLSearchParams(window.location.search);
+                      const hasAuthParams = urlParams.has('access_token') || 
+                                           urlParams.has('refresh_token') || 
+                                           urlParams.has('error') || 
+                                           urlParams.has('code') ||
+                                           urlParams.has('provider');
+                      console.log('Manual OAuth check:', hasAuthParams ? 'Has params' : 'No params');
+                      console.log('URL params:', window.location.search);
+                    }}
+                    className="text-xs text-orange-500 hover:underline ml-2"
+                  >
+                    Check OAuth Params
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Clear URL parameters
+                      window.history.replaceState({}, document.title, window.location.pathname);
+                      console.log('URL parameters cleared');
+                      toast.success('URL parameters cleared');
+                    }}
+                    className="text-xs text-red-500 hover:underline ml-2"
+                  >
+                    Clear URL Params
+                  </button>
+                </div>
+              </details>
+            </div>
+          )}
 
         </CardContent>
       </Card>

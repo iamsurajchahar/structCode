@@ -66,7 +66,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, 
       return fetch(url, {
         ...options,
         // Shorter timeout for faster failure detection
-        signal: options?.signal || AbortSignal.timeout(5000),
+        signal: options?.signal || AbortSignal.timeout(10000), // Increased timeout for OAuth
       });
     }
   },
@@ -89,13 +89,28 @@ export const adminSupabase = SUPABASE_SERVICE_ROLE_KEY
     })
   : null;
 
-// Optimized initial session check (non-blocking)
+// Enhanced initial session check with OAuth handling
 setTimeout(async () => {
   try {
+    // Check for OAuth redirect parameters first
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasAuthParams = urlParams.has('access_token') || 
+                         urlParams.has('refresh_token') || 
+                         urlParams.has('error') || 
+                         urlParams.has('code') ||
+                         urlParams.has('provider');
+    
+    if (hasAuthParams) {
+      console.log('OAuth parameters detected on initial load');
+      // Wait a bit for Supabase to process OAuth
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
     const { data, error } = await supabase.auth.getSession();
     if (error) {
       console.error("Error getting initial session:", error.message);
     } else if (data?.session) {
+      console.log("Initial session found:", data.session.user.email);
       // Check for existence of user profile in background
       setTimeout(async () => {
         try {
@@ -112,6 +127,8 @@ setTimeout(async () => {
           console.error("Error checking initial profile:", err);
         }
       }, 100);
+    } else {
+      console.log("No initial session found");
     }
   } catch (err) {
     console.error("Error checking initial session:", err);

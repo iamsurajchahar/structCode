@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
 import { useTheme } from '@/components/ThemeProvider';
 import { useAuth } from '@/contexts/AuthContext';
-import { Sun, Moon, User, LogOut, MessageSquare } from 'lucide-react';
+import { Sun, Moon, User, LogOut, MessageSquare, Loader2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -92,7 +92,12 @@ const Navbar = () => {
             {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
           </Button>
           
-          {user ? (
+          {loading ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm text-muted-foreground">Loading...</span>
+            </div>
+          ) : user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon">
@@ -121,8 +126,6 @@ const Navbar = () => {
               <Button className="bg-dsa-purple hover:bg-dsa-purple/90" asChild>
                 <Link to="/auth">Sign Up</Link>
               </Button>
-            
-             
             </>
           )}
         </div>
